@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  ImageId:
+    Type: String
+    Default: ami-06c39684f946cd351
+  DBName:
+    Type: String
+  DBUser:
+    Type: String
+  DBHost:
+    Type: String
+  DBPassword:
+    Type: String
+  KeyName:
+    Type: String
+  InstanceType:
+    Type: String
+    Default: t2.micro
+  SubnetId:
+    Type: String
+  VPC:
+    Type: String
+  StackName:
+    Type: String
+  EBSSize:
+    Type: String
+    Default: 32
+
+Resources:
+  Wordpress:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      KeyName: !Ref KeyName
+      InstanceType: !Ref InstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/sdm
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: false
+            VolumeSize: !Ref EBSSize
+          NoDevice: {}
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          SubnetId:
+            Ref: SubnetId
+          GroupSet:
+            - Ref: SecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          #Apache
+          apt-get update
+          apt-get install -y apache2
+          apt-get install -y php5 libapache2-mod-php5 php5-mcrypt
+          service apache2 restart
+          #PHP
+          apt-get update
+          apt-get install -y php5-mysqlnd-ms
+          apt-get install -y php5-gd libssh2-php
+          #Wordpress
+          wget http://wordpress.org/latest.tar.gz -O /home/ubuntu/wordpress.tar.gz
+          tar xzvf /home/ubuntu/wordpress.tar.gz -C /home/ubuntu
+          #DB Configure
+          cp /home/ubuntu/wordpress/wp-config-sample.php /home/ubuntu/wordpress/wp-config.php
+          sed -i -e "s/database_name_here/${DBName}/g" /home/ubuntu/wordpress/wp-config.php
+          sed -i -e "s/username_here/${DBUser}/g" /home/ubuntu/wordpress/wp-config.php
+          sed -i -e "s/password_here/${DBPassword}/g" /home/ubuntu/wordpress/wp-config.php
+          sed -i -e "s/localhost/${DBHost}/g" /home/ubuntu/wordpress/wp-config.php
+          rsync -avP /home/ubuntu/wordpress/ /var/www/html/
+          service apache2 reload
+
+      Tags:
+        - Key: Name
+          Value: !Sub Wordpress-${StackName}
+
+  SecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupName: !Sub Wordpress-${StackName}
+        GroupDescription: !Sub Wordpress-${StackName}
+        VpcId: !Ref VPC
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+        Tags:
+          - Key: Name
+            Value: !Sub Wordpress-${StackName}
+Outputs:
+  Wordpress:
+    Value: !Sub
+      - "http://${Host}:/index.php"
+      - {Host: !GetAtt Wordpress.PublicDnsName}
